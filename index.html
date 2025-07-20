@@ -322,8 +322,6 @@
 
           useEffect(() => {
             try {
-              // --- ¡CORRECCIÓN PARA EL ERROR DE TOKEN! ---
-              // Se define una configuración local como respaldo, usando tu API Key.
               const localFirebaseConfig = {
                 apiKey: "AIzaSyC6B0Jfg77cC51W6sNKpQBwrThmmwdaXmA",
                 authDomain: "gestion-de-sesiones-38ea4.firebaseapp.com",
@@ -333,11 +331,8 @@
                 appId: "1:210978558947:web:f502ff67648ce50b1846d6"
               };
 
-              // Se prioriza la configuración del entorno de ejecución (__firebase_config) si existe.
-              // Esto asegura que el token de autenticación (__initial_auth_token) coincida.
               const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : localFirebaseConfig;
               
-              // Se inicializa Firebase con la configuración correcta (la del entorno o la local).
               firebase.initializeApp(firebaseConfig);
               const firestoreDb = firebase.firestore();
               const firebaseAuth = firebase.auth();
@@ -349,15 +344,30 @@
                 if (user) {
                   setUserId(user.uid);
                 } else {
+                  // --- ¡CORRECCIÓN CON MECANISMO DE RESPALDO! ---
                   try {
                     if (typeof __initial_auth_token !== 'undefined') {
+                      // Se intenta el método principal con el token del entorno
                       await firebaseAuth.signInWithCustomToken(__initial_auth_token);
                     } else {
+                      // Si no hay token, se usa el método anónimo
                       await firebaseAuth.signInAnonymously();
                     }
                   } catch (error) {
-                    console.error("Error signing in:", error);
-                    setMessage(`Error al iniciar sesión: ${error.message}`);
+                    console.error("Error with primary sign-in:", error);
+                    // Si el método principal falla (ej. por restricciones), se activa el respaldo anónimo
+                    if (error.code === 'auth/admin-restricted-operation' || error.code === 'auth/custom-token-mismatch') {
+                        console.log("Custom token failed. Falling back to anonymous sign-in.");
+                        try {
+                            await firebaseAuth.signInAnonymously();
+                        } catch (anonError) {
+                            console.error("Anonymous sign-in also failed:", anonError);
+                            setMessage(`Error al iniciar sesión anónimamente: ${anonError.message}`);
+                        }
+                    } else {
+                        // Para otros errores, se muestra el mensaje original
+                        setMessage(`Error al iniciar sesión: ${error.message}`);
+                    }
                   }
                 }
                 setIsAuthReady(true);

@@ -484,12 +484,7 @@
             setMessage(`Procesando recordatorios para "${session.title}"...`);
 
             // --- ¡ACCIÓN! Reemplaza esta URL con la URL de producción de tu webhook de n8n ---
-            const webhookUrl = 'https://n8n.ejemplo.com/webhook/mi-recordatorio-manual'; 
-
-            if (webhookUrl.includes('https://n8n.ejemplo.com')) {
-                setMessage('Por favor, actualiza la URL del webhook en el código para activar los recordatorios.');
-                return;
-            }
+            const webhookUrl = 'http://localhost:5678/webhook/940fd311-574a-40f6-9230-a00812a4f7c8'; 
 
             try {
               const response = await fetch(webhookUrl, {

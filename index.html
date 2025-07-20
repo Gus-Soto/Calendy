@@ -559,8 +559,28 @@
 
           // --- MODIFICADO --- Esta función ahora se llama desde el modal
           const handleSendRemindersNow = async (session) => {
-            setMessage(`Procesando recordatorios para "${session.title}"...`);
-            const webhookUrl = 'https://c345f5a26a09.ngrok-free.app -> http://localhost:5678  '; 
+    setMessage(`Procesando recordatorios para "${session.title}"...`);
+    // Asegúrate de que esta URL sea la que ngrok te dé en cada inicio (si usas la versión gratuita)
+    const webhookUrl = 'https://c345f5a26a09.ngrok-free.app/webhook/940fd311-574a-40f6-9230-a00812a4f7c8'; 
+    
+    // Aquí iría el código para enviar la solicitud POST a esta webhookUrl
+    // Por ejemplo, usando fetch:
+    // try {
+    //     const response = await fetch(webhookUrl, {
+    //         method: 'POST',
+    //         headers: {
+    //             'Content-Type': 'application/json',
+    //         },
+    //         body: JSON.stringify({ sessionId: session.id }), // o el cuerpo que necesites enviar
+    //     });
+    //     const result = await response.json();
+    //     console.log('Webhook response:', result);
+    //     setMessage('Recordatorios enviados.');
+    // } catch (error) {
+    //     console.error('Error enviando recordatorios:', error);
+    //     setMessage('Error al enviar recordatorios.');
+    // }
+};; 
 
             try {
               const response = await fetch(webhookUrl, {

@@ -560,7 +560,7 @@
           // --- MODIFICADO --- Esta función ahora se llama desde el modal
           const handleSendRemindersNow = async (session) => {
             setMessage(`Procesando recordatorios para "${session.title}"...`);
-            const webhookUrl = 'http://localhost:5678/webhook/940fd311-574a-40f6-9230-a00812a4f7c8'; 
+            const webhookUrl = 'https://c345f5a26a09.ngrok-free.app -> http://localhost:5678  '; 
 
             try {
               const response = await fetch(webhookUrl, {

@@ -344,18 +344,14 @@
                 if (user) {
                   setUserId(user.uid);
                 } else {
-                  // --- ¡CORRECCIÓN CON MECANISMO DE RESPALDO! ---
                   try {
                     if (typeof __initial_auth_token !== 'undefined') {
-                      // Se intenta el método principal con el token del entorno
                       await firebaseAuth.signInWithCustomToken(__initial_auth_token);
                     } else {
-                      // Si no hay token, se usa el método anónimo
                       await firebaseAuth.signInAnonymously();
                     }
                   } catch (error) {
                     console.error("Error with primary sign-in:", error);
-                    // Si el método principal falla (ej. por restricciones), se activa el respaldo anónimo
                     if (error.code === 'auth/admin-restricted-operation' || error.code === 'auth/custom-token-mismatch') {
                         console.log("Custom token failed. Falling back to anonymous sign-in.");
                         try {
@@ -365,7 +361,6 @@
                             setMessage(`Error al iniciar sesión anónimamente: ${anonError.message}`);
                         }
                     } else {
-                        // Para otros errores, se muestra el mensaje original
                         setMessage(`Error al iniciar sesión: ${error.message}`);
                     }
                   }
@@ -432,17 +427,28 @@
               setMessage('Por favor, completa todos los campos requeridos y añade al menos un contacto.');
               return;
             }
-            if (!db || !userId) {
-              setMessage('La base de datos no está lista. Inténtalo de nuevo.');
+            if (!db || !userId || !isAuthReady) {
+              setMessage('La base de datos o la autenticación no están listas. Inténtalo de nuevo.');
+              console.error("Firestore or Auth not ready", { db, userId, isAuthReady });
               return;
             }
-            const sessionData = { title: sessionTitle, date: sessionDate, time: sessionTime, attendees: currentSessionAttendees, notes: notes, sessionType: selectedSessionType, createdBy: userId };
+            const sessionData = { 
+                title: sessionTitle, 
+                date: sessionDate, 
+                time: sessionTime, 
+                attendees: currentSessionAttendees, 
+                notes: notes, 
+                sessionType: selectedSessionType, 
+                createdBy: userId 
+            };
             try {
               if (editingSessionId) {
-                await db.doc(`artifacts/${getAppId()}/public/data/sessions/${editingSessionId}`).update({ ...sessionData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+                const docRef = db.doc(`artifacts/${getAppId()}/public/data/sessions/${editingSessionId}`);
+                await docRef.update({ ...sessionData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
                 setMessage('Sesión actualizada exitosamente.');
               } else {
-                await db.collection(`artifacts/${getAppId()}/public/data/sessions`).add({ ...sessionData, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+                const collectionRef = db.collection(`artifacts/${getAppId()}/public/data/sessions`);
+                await collectionRef.add({ ...sessionData, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
                 setMessage('Sesión añadida exitosamente.');
               }
               clearSessionForm();
@@ -473,8 +479,40 @@
             }
           };
 
-          const handleSendReminders = (session) => {
-            setMessage(`Funcionalidad de recordatorios para "${session.title}" se implementará en el futuro.`);
+          const handleSendReminders = async (session) => {
+            // Show immediate feedback to the user
+            setMessage(`Procesando recordatorios para "${session.title}"...`);
+
+            // --- ¡ACCIÓN! Reemplaza esta URL con la URL de producción de tu webhook de n8n ---
+            const webhookUrl = 'https://n8n.ejemplo.com/webhook/mi-recordatorio-manual'; 
+
+            if (webhookUrl.includes('https://n8n.ejemplo.com')) {
+                setMessage('Por favor, actualiza la URL del webhook en el código para activar los recordatorios.');
+                return;
+            }
+
+            try {
+              const response = await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                // Send the session ID to n8n
+                body: JSON.stringify({ sessionId: session.id })
+              });
+
+              if (!response.ok) {
+                throw new Error(`Error en la llamada al webhook: ${response.statusText}`);
+              }
+
+              const result = await response.json();
+              // Assuming n8n responds with a success message
+              setMessage(result.message || 'La solicitud de recordatorios fue enviada.');
+
+            } catch (error) {
+              console.error("Error sending reminders via n8n:", error);
+              setMessage(`Error al enviar recordatorios: ${error.message}`);
+            }
           };
 
           const handleAddTag = async () => {
@@ -740,4 +778,4 @@
     </script>
 
 </body>
-</ht
+</html>

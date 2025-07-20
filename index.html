@@ -322,9 +322,22 @@
 
           useEffect(() => {
             try {
-              const localFirebaseConfig = { apiKey: AIzaSyC6B0Jfg77cC51W6sNKpQBwrThmmwdaXmA, authDomain: "gestion-de-sesiones-38ea4.firebaseapp.com", projectId: "gestion-de-sesiones-38ea4", storageBucket: "gestion-de-sesiones-38ea4.appspot.com", messagingSenderId: "210978558947", appId: "1:210978558947:web:f502ff67648ce50b1846d6" };
+              // --- ¡CORRECCIÓN PARA EL ERROR DE TOKEN! ---
+              // Se define una configuración local como respaldo, usando tu API Key.
+              const localFirebaseConfig = {
+                apiKey: "AIzaSyC6B0Jfg77cC51W6sNKpQBwrThmmwdaXmA",
+                authDomain: "gestion-de-sesiones-38ea4.firebaseapp.com",
+                projectId: "gestion-de-sesiones-38ea4",
+                storageBucket: "gestion-de-sesiones-38ea4.appspot.com",
+                messagingSenderId: "210978558947",
+                appId: "1:210978558947:web:f502ff67648ce50b1846d6"
+              };
+
+              // Se prioriza la configuración del entorno de ejecución (__firebase_config) si existe.
+              // Esto asegura que el token de autenticación (__initial_auth_token) coincida.
               const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : localFirebaseConfig;
               
+              // Se inicializa Firebase con la configuración correcta (la del entorno o la local).
               firebase.initializeApp(firebaseConfig);
               const firestoreDb = firebase.firestore();
               const firebaseAuth = firebase.auth();

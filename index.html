@@ -5,17 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Organizador de Sesiones</title>
     
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- React y ReactDOM -->
     <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
     
-    <!-- Babel para transpilar JSX en el navegador -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Firebase (versiones de compatibilidad para uso con <script>) -->
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
@@ -41,7 +37,6 @@
 
     <div id="root"></div>
 
-    <!-- Tu código React va aquí, dentro de una etiqueta de script con tipo "text/babel" -->
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
@@ -288,6 +283,81 @@
             </div>
           );
         };
+        
+        // --- NUEVO ---
+        // Nuevo Modal para programar recordatorios
+        const ScheduleReminderModal = ({ show, onClose, onSendNow, onSchedule, session }) => {
+          const [amount, setAmount] = useState(24);
+          const [unit, setUnit] = useState('hours');
+
+          if (!show) return null;
+
+          const handleScheduleClick = () => {
+            if (amount <= 0) {
+              alert('La cantidad debe ser mayor que cero.');
+              return;
+            }
+            onSchedule(session, { amount, unit });
+          };
+          
+          const handleCancelSchedule = () => {
+              onSchedule(session, null); // Pasar null para cancelar
+          };
+
+          return (
+            <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md border border-pink-100 relative">
+                <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-3xl leading-none" title="Cerrar">&times;</button>
+                <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-2">Recordatorios</h2>
+                <p className="text-center text-gray-600 mb-6">Para la sesión: <span className="font-bold">{session.title}</span></p>
+
+                <div className="space-y-4">
+                  <button onClick={() => onSendNow(session)} className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-2">
+                    Enviar Recordatorio Ahora
+                  </button>
+                  
+                  <div className="border-t border-gray-200 pt-4">
+                     <h3 className="text-lg font-semibold text-gray-700 mb-3 text-center">O Programar Recordatorio</h3>
+                     {session.reminderSchedule ? (
+                        <div className="text-center bg-blue-100 border border-blue-300 text-blue-800 p-4 rounded-lg">
+                            <p className="font-semibold">Recordatorio ya programado para enviarse:</p>
+                            <p className="text-lg">{session.reminderSchedule.amount} {session.reminderSchedule.unit === 'hours' ? 'hora(s)' : 'día(s)'} antes de la sesión.</p>
+                            <button onClick={handleCancelSchedule} className="mt-3 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-md text-sm">
+                                Cancelar Programación
+                            </button>
+                        </div>
+                     ) : (
+                        <div className="flex items-center gap-3">
+                            <input 
+                                type="number" 
+                                className="w-1/3 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400"
+                                value={amount}
+                                onChange={(e) => setAmount(parseInt(e.target.value, 10))}
+                                min="1"
+                            />
+                            <select 
+                                className="w-2/3 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 bg-white"
+                                value={unit}
+                                onChange={(e) => setUnit(e.target.value)}
+                            >
+                                <option value="hours">Hora(s) antes</option>
+                                <option value="days">Día(s) antes</option>
+                            </select>
+                        </div>
+                     )}
+                  </div>
+                  
+                  {!session.reminderSchedule && (
+                     <button onClick={handleScheduleClick} className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2">
+                        Guardar Programación
+                     </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        };
+
 
         function App() {
           const [sessionTitle, setSessionTitle] = useState('');
@@ -317,6 +387,10 @@
           const [showTagManagementModal, setShowTagManagementModal] = useState(false);
           const [showContactManagementModal, setShowContactManagementModal] = useState(false);
           const [selectedMonthFilter, setSelectedMonthFilter] = useState('');
+          // --- NUEVO ---
+          const [showScheduleModal, setShowScheduleModal] = useState(false);
+          const [sessionForReminder, setSessionForReminder] = useState(null);
+
 
           const getAppId = () => typeof __app_id !== 'undefined' ? __app_id : 'gestion-de-sesiones-38ea4';
 
@@ -333,7 +407,9 @@
 
               const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : localFirebaseConfig;
               
-              firebase.initializeApp(firebaseConfig);
+              if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+              }
               const firestoreDb = firebase.firestore();
               const firebaseAuth = firebase.auth();
 
@@ -439,7 +515,9 @@
                 attendees: currentSessionAttendees, 
                 notes: notes, 
                 sessionType: selectedSessionType, 
-                createdBy: userId 
+                createdBy: userId,
+                // --- MODIFICADO --- Inicializar sin recordatorio programado
+                reminderSchedule: null 
             };
             try {
               if (editingSessionId) {
@@ -479,37 +557,60 @@
             }
           };
 
-          const handleSendReminders = async (session) => {
-            // Show immediate feedback to the user
+          // --- MODIFICADO --- Esta función ahora se llama desde el modal
+          const handleSendRemindersNow = async (session) => {
             setMessage(`Procesando recordatorios para "${session.title}"...`);
-
-            // --- ¡URL PÚBLICA ACTUALIZADA! ---
-            // Esta es la nueva dirección pública de tu webhook, gracias a ngrok.
             const webhookUrl = 'https://c345f5a26a09.ngrok-free.app/webhook/940fd311-574a-40f6-9230-a00812a4f7c8'; 
 
             try {
               const response = await fetch(webhookUrl, {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                // Send the session ID to n8n
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sessionId: session.id })
               });
-
-              if (!response.ok) {
-                throw new Error(`Error en la llamada al webhook: ${response.statusText}`);
-              }
-
+              if (!response.ok) { throw new Error(`Error en la llamada al webhook: ${response.statusText}`); }
               const result = await response.json();
-              // Assuming n8n responds with a success message
               setMessage(result.message || 'La solicitud de recordatorios fue enviada.');
-
             } catch (error) {
               console.error("Error sending reminders via n8n:", error);
               setMessage(`Error al enviar recordatorios: ${error.message}`);
             }
+            setShowScheduleModal(false);
           };
+          
+          // --- NUEVO --- Función para guardar o cancelar la programación
+          const handleScheduleReminder = async (session, schedule) => {
+             if (!db) {
+                setMessage('La base de datos no está lista.');
+                return;
+            }
+            const sessionRef = db.doc(`artifacts/${getAppId()}/public/data/sessions/${session.id}`);
+            try {
+                if (schedule) {
+                    await sessionRef.update({ 
+                        reminderSchedule: schedule,
+                        reminderSent: false // Asegurarse de que el estado de envío se reinicie
+                    });
+                    setMessage('Recordatorio programado exitosamente.');
+                } else {
+                     await sessionRef.update({ 
+                        reminderSchedule: firebase.firestore.FieldValue.delete() 
+                     });
+                     setMessage('Programación de recordatorio cancelada.');
+                }
+            } catch(e) {
+                console.error("Error updating schedule: ", e);
+                setMessage(`Error al actualizar la programación: ${e.message}`);
+            }
+            setShowScheduleModal(false);
+          };
+          
+          // --- NUEVO --- Función para abrir el modal de recordatorios
+          const openReminderOptions = (session) => {
+              setSessionForReminder(session);
+              setShowScheduleModal(true);
+          };
+
 
           const handleAddTag = async () => {
             if (!newTagName.trim()) {
@@ -743,6 +844,12 @@
                           <h3 className="text-xl font-semibold text-gray-800">{session.title}</h3>
                           <p className="text-gray-600 text-sm">Fecha: <span className="font-medium">{session.date}</span> | Hora: <span className="font-medium">{session.time}</span></p>
                           {session.sessionType && (() => { const tag = tags.find(t => t.name === session.sessionType); return tag ? (<span className="mt-2 inline-block px-2 py-0.5 rounded-full text-white text-xs font-medium" style={{ backgroundColor: tag.color }}>{tag.name}</span>) : null; })()}
+                           {/* --- MODIFICADO --- Muestra si un recordatorio está programado */}
+                           {session.reminderSchedule && (
+                                <div className="mt-2 text-sm text-blue-700 bg-blue-100 border border-blue-200 rounded-md p-2 inline-block">
+                                  <span>⏰ Recordatorio programado</span>
+                                </div>
+                            )}
                           {session.attendees && session.attendees.length > 0 && (
                             <div className="mt-2">
                               <p className="text-gray-600 text-sm font-semibold">Asistentes:</p>
@@ -754,18 +861,21 @@
                           {session.notes && <p className="text-gray-600 text-sm italic mt-2">Notas: {session.notes}</p>}
                         </div>
                         <div className="flex flex-col space-y-2 self-start md:self-center mt-3 md:mt-0">
-                          <button onClick={() => handleSendReminders(session)} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg shadow-md text-sm">Enviar Recordatorios</button>
+                          {/* --- MODIFICADO --- Este botón ahora abre el nuevo modal */}
+                          <button onClick={() => openReminderOptions(session)} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg shadow-md text-sm">Gestionar Recordatorios</button>
                         </div>
                       </div>
                     ))
                   )}
                 </div>
               </div>
-
+              
+              {/* --- MODIFICADO --- Renderiza los 4 modales */}
               <TagManagementModal show={showTagManagementModal} onClose={() => setShowTagManagementModal(false)} tags={tags} newTagName={newTagName} setNewTagName={setNewTagName} newTagColor={newTagColor} setNewTagColor={setNewTagColor} handleAddTag={handleAddTag} handleDeleteTag={handleDeleteTag} message={message} />
               <ContactManagementModal show={showContactManagementModal} onClose={() => setShowContactManagementModal(false)} userId={userId} db={db} onAddContactToSession={handleAddContactToSessionList} setMessage={setMessage} currentSessionAttendees={currentSessionAttendees} getAppId={getAppId} />
               <SessionDetailsModal show={showSessionDetailsModal} onClose={() => setShowSessionDetailsModal(false)} session={selectedCalendarSession} tags={tags} onEditSession={handleEditSession} onDeleteSession={handleDeleteSession} />
               <ConfirmationModal show={showConfirmationModal} onClose={() => setShowConfirmationModal(false)} onConfirm={confirmDeleteSession} message="¿Estás seguro de que quieres eliminar esta sesión? Esta acción no se puede deshacer." />
+              <ScheduleReminderModal show={showScheduleModal} onClose={() => setShowScheduleModal(false)} session={sessionForReminder} onSendNow={handleSendRemindersNow} onSchedule={handleScheduleReminder} />
             </div>
           );
         }

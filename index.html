@@ -1,1157 +1,720 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, onSnapshot, query, serverTimestamp, doc, deleteDoc, updateDoc, getDocs } from 'firebase/firestore';
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organizador de Sesiones</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React y ReactDOM -->
+    <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+    
+    <!-- Babel para transpilar JSX en el navegador -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-// Helper function to normalize dates to local midnight for consistent comparison
-const normalizeDate = (dateInput) => {
-  if (!dateInput) return null;
-  let d;
-  // If dateInput is a string in "YYYY-MM-DD" format, parse it manually to ensure local time interpretation
-  if (typeof dateInput === 'string' && dateInput.includes('-')) {
-    const [year, month, day] = dateInput.split('-').map(Number);
-    d = new Date(year, month - 1, day); // Month is 0-indexed in Date constructor
-  } else {
-    // If dateInput is already a Date object or other format, proceed as before
-    d = new Date(dateInput);
-  }
-  d.setHours(0, 0, 0, 0); // Set to local midnight
-  return d;
-};
+    <!-- Firebase (versiones de compatibilidad para uso con <script>) -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
 
-// Modal component for managing tags
-const TagManagementModal = ({
-  show,
-  onClose,
-  tags,
-  newTagName,
-  setNewTagName,
-  newTagColor,
-  setNewTagColor,
-  handleAddTag,
-  handleDeleteTag,
-  message
-}) => {
-  if (!show) return null;
-
-  return (
-    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md border border-pink-100 relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-3xl leading-none"
-          title="Cerrar"
-        >
-          &times;
-        </button>
-        <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-6">
-          Gestionar Etiquetas
-        </h2>
-
-        {message && (
-          <div className="bg-pink-100 border border-pink-400 text-pink-700 px-4 py-3 rounded-md relative mb-4 shadow-sm" role="alert">
-            <span className="block sm:inline">{message}</span>
-          </div>
-        )}
-
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row gap-3 items-end">
-            <div className="flex-grow">
-              <label htmlFor="modalNewTagName" className="block text-gray-700 text-sm font-semibold mb-1">Nombre de la Etiqueta</label>
-              <input
-                type="text"
-                id="modalNewTagName"
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm appearance-none"
-                placeholder="Ej: Urgente, Seguimiento"
-                value={newTagName}
-                onChange={(e) => setNewTagName(e.target.value)}
-              />
-            </div>
-            <div>
-              <label htmlFor="modalNewTagColor" className="block text-gray-700 text-sm font-semibold mb-1">Color</label>
-              <input
-                type="color"
-                id="modalNewTagColor"
-                className="w-20 h-12 p-1 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm cursor-pointer"
-                value={newTagColor}
-                onChange={(e) => setNewTagColor(e.target.value)}
-              />
-            </div>
-            <button
-              onClick={handleAddTag}
-              className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 w-full sm:w-auto"
-            >
-              Añadir Etiqueta
-            </button>
-          </div>
-
-          {tags.length === 0 ? (
-            <p className="text-center text-gray-500 mt-4">No has creado ninguna etiqueta aún.</p>
-          ) : (
-            <div className="flex flex-wrap gap-3 pt-4 border-t border-gray-100 mt-4">
-              {tags.map(tag => (
-                <div key={tag.id} className="flex items-center bg-gray-100 rounded-full pr-2 shadow-sm border border-gray-200">
-                  <span
-                    className="px-3 py-1 rounded-full text-white text-sm font-medium mr-2"
-                    style={{ backgroundColor: tag.color }}
-                  >
-                    {tag.name}
-                  </span>
-                  <button
-                    onClick={() => handleDeleteTag(tag.id, tag.name)}
-                    className="text-gray-500 hover:text-red-600 text-lg leading-none transition-colors duration-200"
-                    title="Eliminar etiqueta"
-                  >
-                    &times;
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Modal component for managing contacts (search and add)
-const ContactManagementModal = ({
-  show,
-  onClose,
-  userId,
-  db,
-  onAddContactToSession,
-  setMessage,
-  currentSessionAttendees,
-  getAppId
-}) => {
-  if (!show) return null;
-
-  const [searchTerm, setSearchTerm] = useState('');
-  const [foundContacts, setFoundContacts] = useState([]);
-  const [newContactName, setNewContactName] = useState('');
-  const [newContactId, setNewContactId] = useState('');
-  const [newContactEmail, setNewContactEmail] = useState('');
-  const [newContactPhone, setNewContactPhone] = useState('');
-
-  // Fetch contacts based on search term
-  useEffect(() => {
-    if (!db || !userId || !getAppId()) return;
-
-    const contactsCollectionRef = collection(db, `artifacts/${getAppId()}/users/${userId}/contacts`);
-    let q = query(contactsCollectionRef);
-
-    if (searchTerm.trim()) {
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const allContacts = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
-        const lowerCaseSearchTerm = searchTerm.toLowerCase();
-        const filtered = allContacts.filter(contact =>
-          (contact.name && contact.name.toLowerCase().includes(lowerCaseSearchTerm)) ||
-          (contact.id && contact.id.includes(lowerCaseSearchTerm))
-        );
-        setFoundContacts(filtered);
-      }, (error) => {
-        console.error("Error searching contacts:", error);
-        setMessage(`Error al buscar contactos: ${error.message}`);
-      });
-      return () => unsubscribe();
-    } else {
-      setFoundContacts([]);
-    }
-  }, [searchTerm, db, userId, setMessage, getAppId]);
-
-  const handleAddNewContact = async () => {
-    if (!newContactName.trim() && !newContactEmail.trim() && !newContactPhone.trim()) {
-      setMessage('Por favor, ingresa al menos el nombre, email o teléfono para el nuevo contacto.');
-      return;
-    }
-    if (newContactId.trim() && !/^\d{9}$/.test(newContactId.trim())) {
-      setMessage('El formato de la Cédula debe ser 9 dígitos numéricos (ej: 503400393).');
-      return;
-    }
-    if (!db || !userId || !getAppId()) {
-      setMessage('La base de datos o el ID de usuario no están listos.');
-      return;
-    }
-
-    const contactData = {
-      name: newContactName.trim(),
-      id: newContactId.trim(),
-      email: newContactEmail.trim(),
-      phone: newContactPhone.trim(),
-    };
-
-    try {
-      const docRef = await addDoc(collection(db, `artifacts/${getAppId()}/users/${userId}/contacts`), contactData);
-      setMessage('Nuevo contacto guardado y añadido a la sesión.');
-      onAddContactToSession({ ...contactData, docId: docRef.id });
-      setNewContactName('');
-      setNewContactId('');
-      setNewContactEmail('');
-      setNewContactPhone('');
-    } catch (e) {
-      console.error("Error adding new contact:", e);
-      setMessage(`Error al guardar nuevo contacto: ${e.message}`);
-    }
-  };
-
-  const handleSelectExistingContact = (contact) => {
-    const isDuplicate = currentSessionAttendees.some(att => att.docId === contact.docId);
-    if (isDuplicate) {
-      setMessage('Este contacto ya ha sido añadido a la sesión.');
-      return;
-    }
-    onAddContactToSession(contact);
-    setMessage(`Contacto "${contact.name}" añadido a la sesión.`);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-2xl border border-pink-100 relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-3xl leading-none"
-          title="Cerrar"
-        >
-          &times;
-        </button>
-        <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-6">
-          Gestionar Contactos
-        </h2>
-
-        <div className="border border-pink-200 p-4 rounded-lg bg-pink-50 shadow-inner mb-6">
-          <h3 className="text-md font-semibold text-gray-700 mb-3">Buscar Contacto Existente</h3>
-          <input
-            type="text"
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm appearance-none mb-3"
-            placeholder="Buscar por nombre o cédula..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-          {foundContacts.length > 0 && (
-            <div className="max-h-48 overflow-y-auto custom-scrollbar border border-gray-200 rounded-lg bg-white">
-              {foundContacts.map(contact => (
-                <div key={contact.docId} className="flex justify-between items-center p-3 border-b border-gray-100 last:border-b-0">
-                  <div className="text-sm">
-                    <p className="font-medium">{contact.name}</p>
-                    {contact.id && <p className="text-gray-600 text-xs">Cédula: {contact.id}</p>}
-                    {contact.email && <p className="text-gray-600 text-xs">Email: {contact.email}</p>}
-                    {contact.phone && <p className="text-gray-600 text-xs">Celular: {contact.phone}</p>}
-                  </div>
-                  <button
-                    onClick={() => handleSelectExistingContact(contact)}
-                    className="bg-purple-500 hover:bg-purple-600 text-white text-sm py-1.5 px-3 rounded-lg shadow-md transition duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2"
-                  >
-                    Añadir
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          {searchTerm.trim() && foundContacts.length === 0 && (
-            <p className="text-center text-gray-500 text-sm mt-2">No se encontraron contactos.</p>
-          )}
-        </div>
-
-        <div className="border border-pink-200 p-4 rounded-lg bg-pink-50 shadow-inner">
-          <h3 className="text-md font-semibold text-gray-700 mb-3">Añadir Nuevo Contacto</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-            <div>
-              <label htmlFor="modalNewContactName" className="block text-gray-700 text-xs font-semibold mb-1">Nombre Completo</label>
-              <input
-                type="text"
-                id="modalNewContactName"
-                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-pink-300 focus:border-transparent text-sm"
-                placeholder="Nombre y Apellidos"
-                value={newContactName}
-                onChange={(e) => setNewContactName(e.target.value)}
-              />
-            </div>
-            <div>
-              <label htmlFor="modalNewContactId" className="block text-gray-700 text-xs font-semibold mb-1">Cédula (9 dígitos)</label>
-              <input
-                type="text"
-                id="modalNewContactId"
-                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-pink-300 focus:border-transparent text-sm"
-                placeholder="Ej: 503400393"
-                value={newContactId}
-                onChange={(e) => setNewContactId(e.target.value.replace(/\D/g, '').slice(0, 9))}
-                maxLength="9"
-              />
-            </div>
-            <div>
-              <label htmlFor="modalNewContactEmail" className="block text-gray-700 text-xs font-semibold mb-1">Email</label>
-              <input
-                type="email"
-                id="modalNewContactEmail"
-                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-pink-300 focus:border-transparent text-sm"
-                placeholder="contacto@ejemplo.com"
-                value={newContactEmail}
-                onChange={(e) => setNewContactEmail(e.target.value)}
-              />
-            </div>
-            <div>
-              <label htmlFor="modalNewContactPhone" className="block text-gray-700 text-xs font-semibold mb-1">Celular</label>
-              <input
-                type="tel"
-                id="modalNewContactPhone"
-                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-pink-300 focus:border-transparent text-sm"
-                placeholder="Ej: +50612345678"
-                value={newContactPhone}
-                onChange={(e) => setNewContactPhone(e.target.value)}
-              />
-            </div>
-          </div>
-          <button
-            onClick={handleAddNewContact}
-            className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-3 rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2"
-          >
-            Guardar y Añadir a Sesión
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Modal for displaying full session details when clicked in calendar
-const SessionDetailsModal = ({ show, onClose, session, tags, onEditSession, onDeleteSession }) => {
-  if (!show || !session) return null;
-
-  const tag = tags.find(t => t.name === session.sessionType);
-
-  return (
-    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md border border-pink-100 relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-3xl leading-none"
-          title="Cerrar"
-        >
-          &times;
-        </button>
-        <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-6">
-          Detalles de la Sesión
-        </h2>
-
-        <div className="space-y-3 text-gray-700">
-          <p><span className="font-semibold">Título:</span> {session.title}</p>
-          <p><span className="font-semibold">Fecha:</span> {session.date}</p>
-          <p><span className="font-semibold">Hora:</span> {session.time}</p>
-
-          {session.attendees && session.attendees.length > 0 && (
-            <div>
-              <p className="font-semibold">Asistentes:</p>
-              <ul className="list-disc list-inside ml-4 text-sm">
-                {session.attendees.map((att, index) => (
-                  <li key={index}>
-                    {att.name || att.email || att.phone}
-                    {att.id && ` (Cédula: ${att.id})`}
-                    {att.email && att.name && ` | Email: ${att.email}`}
-                    {att.phone && att.name && ` | Celular: ${att.phone}`}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {session.sessionType && tag && (
-            <p className="font-semibold">Tipo:
-              <span
-                className="ml-2 px-2 py-0.5 rounded-full text-white text-sm"
-                style={{ backgroundColor: tag.color }}
-              >
-                {tag.name}
-              </span>
-            </p>
-          )}
-
-          {session.notes && <p><span className="font-semibold">Notas:</span> {session.notes}</p>}
-        </div>
-
-        <div className="flex justify-end mt-6 space-x-3">
-          <button
-            onClick={() => {
-              onEditSession(session);
-              onClose(); // Close modal after initiating edit
-            }}
-            className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2"
-          >
-            Modificar Sesión
-          </button>
-          <button
-            onClick={() => onDeleteSession(session.id)}
-            className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
-          >
-            Eliminar Sesión
-          </button>
-          <button
-            onClick={onClose}
-            className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
-          >
-            Cerrar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Confirmation Modal for deletion
-const ConfirmationModal = ({ show, onClose, onConfirm, message }) => {
-  if (!show) return null;
-
-  return (
-    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm border border-red-300 relative">
-        <h2 className="text-2xl font-bold text-center text-red-700 mb-4">Confirmar Eliminación</h2>
-        <p className="text-gray-700 text-center mb-6">{message}</p>
-        <div className="flex justify-center space-x-4">
-          <button
-            onClick={onConfirm}
-            className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
-          >
-            Sí, Eliminar
-          </button>
-          <button
-            onClick={onClose}
-            className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
-          >
-            No, Cancelar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-
-function App() {
-  const [sessionTitle, setSessionTitle] = useState('');
-  const [sessionDate, setSessionDate] = useState('');
-  const [sessionTime, setSessionTime] = useState('');
-  const [notes, setNotes] = useState('');
-  const [sessions, setSessions] = useState([]);
-  const [userId, setUserId] = useState(null);
-  const [db, setDb] = useState(null);
-  const [auth, setAuth] = useState(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [message, setMessage] = useState('');
-
-  const [currentSessionAttendees, setCurrentSessionAttendees] = useState([]);
-  const [editingSessionId, setEditingSessionId] = useState(null);
-
-  const motivationalPhrases = useMemo(() => [
-    "El éxito es la suma de pequeños esfuerzos repetidos día tras día.",
-    "Cree en ti mismo y todo será posible.",
-    "La única forma de hacer un gran trabajo es amar lo que haces.",
-    "No te rindas, el principio es siempre lo más difícil.",
-    "Cada día es una nueva oportunidad para cambiar tu vida.",
-  ], []);
-
-  const [randomMotivationalPhrase, setRandomMotivationalPhrase] = useState('');
-
-  const [currentView, setCurrentView] = useState('month');
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedCalendarSession, setSelectedCalendarSession] = useState(null);
-  const [showSessionDetailsModal, setShowSessionDetailsModal] = useState(false);
-  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
-  const [sessionToDeleteId, setSessionToDeleteId] = useState(null);
-
-  const [tags, setTags] = useState([]);
-  const [newTagName, setNewTagName] = useState('');
-  const [newTagColor, setNewTagColor] = useState('#60A5FA');
-  const [selectedSessionType, setSelectedSessionType] = useState('');
-  const [showTagManagementModal, setShowTagManagementModal] = useState(false);
-  const [showContactManagementModal, setShowContactManagementModal] = useState(false);
-
-  const [selectedMonthFilter, setSelectedMonthFilter] = useState('');
-
-  // Helper to get appId based on environment
-  const getAppId = () => {
-    // This function checks if a global __app_id variable exists (in Canvas environment)
-    // and falls back to a project ID from a local config if not.
-    // eslint-disable-next-line no-undef
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'gestion-de-sesiones-38ea4';
-    return appId;
-  };
-
-  // Initialize Firebase and set up authentication listener
-  useEffect(() => {
-    try {
-      // Default Firebase configuration for local development
-      const localFirebaseConfig = {
-        apiKey: "YOUR_API_KEY", // Replace with your actual API Key
-        authDomain: "gestion-de-sesiones-38ea4.firebaseapp.com",
-        projectId: "gestion-de-sesiones-38ea4",
-        storageBucket: "gestion-de-sesiones-38ea4.appspot.com",
-        messagingSenderId: "210978558947",
-        appId: "1:210978558947:web:f502ff67648ce50b1846d6"
-      };
-
-      // Use config from Canvas environment if available, otherwise use local config
-      // eslint-disable-next-line no-undef
-      const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : localFirebaseConfig;
-
-      const app = initializeApp(firebaseConfig);
-      const firestoreDb = getFirestore(app);
-      const firebaseAuth = getAuth(app);
-
-      setDb(firestoreDb);
-      setAuth(firebaseAuth);
-
-      const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
-        if (user) {
-          setUserId(user.uid);
-        } else {
-          try {
-            // eslint-disable-next-line no-undef
-            if (typeof __initial_auth_token !== 'undefined') {
-              // eslint-disable-next-line no-undef
-              await signInWithCustomToken(firebaseAuth, __initial_auth_token);
-            } else {
-              await signInAnonymously(firebaseAuth);
-            }
-          } catch (error) {
-            console.error("Error signing in:", error);
-            setMessage(`Error al iniciar sesión: ${error.message}`);
-          }
+    <style>
+        /* Estilos personalizados para la barra de desplazamiento */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 5px;
         }
-        setIsAuthReady(true);
-      });
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 5px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
 
-      setRandomMotivationalPhrase(motivationalPhrases[Math.floor(Math.random() * motivationalPhrases.length)]);
+    <div id="root"></div>
 
-      return () => unsubscribe();
-    } catch (error) {
-      console.error("Failed to initialize Firebase:", error);
-      setMessage(`Error al inicializar Firebase: ${error.message}`);
-    }
-  }, [motivationalPhrases]);
+    <!-- Tu código React va aquí, dentro de una etiqueta de script con tipo "text/babel" -->
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
 
-  // Fetch sessions
-  useEffect(() => {
-    if (db && userId && isAuthReady) {
-      const sessionsCollectionRef = collection(db, `artifacts/${getAppId()}/public/data/sessions`);
-      const q = query(sessionsCollectionRef);
+        // Helper function to normalize dates to local midnight for consistent comparison
+        const normalizeDate = (dateInput) => {
+          if (!dateInput) return null;
+          let d;
+          if (typeof dateInput === 'string' && dateInput.includes('-')) {
+            const [year, month, day] = dateInput.split('-').map(Number);
+            d = new Date(year, month - 1, day);
+          } else {
+            d = new Date(dateInput);
+          }
+          d.setHours(0, 0, 0, 0);
+          return d;
+        };
 
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const fetchedSessions = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        fetchedSessions.sort((a, b) => (a.createdAt?.toDate() || 0) - (b.createdAt?.toDate() || 0));
-        setSessions(fetchedSessions);
-      }, (error) => {
-        console.error("Error fetching sessions:", error);
-        setMessage(`Error al cargar sesiones: ${error.message}`);
-      });
+        // Modal component for managing tags
+        const TagManagementModal = ({
+          show,
+          onClose,
+          tags,
+          newTagName,
+          setNewTagName,
+          newTagColor,
+          setNewTagColor,
+          handleAddTag,
+          handleDeleteTag,
+          message
+        }) => {
+          if (!show) return null;
 
-      return () => unsubscribe();
-    }
-  }, [db, userId, isAuthReady]);
-
-  // Fetch tags
-  useEffect(() => {
-    if (db && userId && isAuthReady) {
-      const tagsCollectionRef = collection(db, `artifacts/${getAppId()}/users/${userId}/tags`);
-      const q = query(tagsCollectionRef);
-
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const fetchedTags = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setTags(fetchedTags);
-      }, (error) => {
-        console.error("Error fetching tags:", error);
-        setMessage(`Error al cargar etiquetas: ${error.message}`);
-      });
-
-      return () => unsubscribe();
-    }
-  }, [db, userId, isAuthReady]);
-
-  const handleAddContactToSessionList = (contact) => {
-    const isDuplicate = currentSessionAttendees.some(att => att.docId === contact.docId);
-    if (isDuplicate) {
-      setMessage('Este contacto ya ha sido añadido a la sesión.');
-      return;
-    }
-    setCurrentSessionAttendees(prev => [...prev, contact]);
-    setMessage(`Contacto "${contact.name || contact.email || contact.phone}" añadido a la sesión.`);
-  };
-
-  const handleRemoveContactFromSession = (indexToRemove) => {
-    setCurrentSessionAttendees(prev => prev.filter((_, index) => index !== indexToRemove));
-    setMessage('Contacto eliminado de la lista de la sesión.');
-  };
-
-  const clearSessionForm = () => {
-    setSessionTitle('');
-    setSessionDate('');
-    setSessionTime('');
-    setNotes('');
-    setCurrentSessionAttendees([]);
-    setSelectedSessionType('');
-    setEditingSessionId(null);
-  };
-
-  const handleAddOrUpdateSession = async () => {
-    if (!sessionTitle || !sessionDate || !sessionTime || !selectedSessionType || currentSessionAttendees.length === 0) {
-      setMessage('Por favor, completa todos los campos requeridos y añade al menos un contacto.');
-      return;
-    }
-    if (!db || !userId) {
-      setMessage('La base de datos no está lista. Inténtalo de nuevo.');
-      return;
-    }
-
-    const sessionData = {
-      title: sessionTitle,
-      date: sessionDate,
-      time: sessionTime,
-      attendees: currentSessionAttendees,
-      notes: notes,
-      sessionType: selectedSessionType,
-      createdBy: userId,
-    };
-
-    try {
-      if (editingSessionId) {
-        await updateDoc(doc(db, `artifacts/${getAppId()}/public/data/sessions`, editingSessionId), {
-          ...sessionData,
-          updatedAt: serverTimestamp(),
-        });
-        setMessage('Sesión actualizada exitosamente.');
-      } else {
-        await addDoc(collection(db, `artifacts/${getAppId()}/public/data/sessions`), {
-          ...sessionData,
-          createdAt: serverTimestamp(),
-        });
-        setMessage('Sesión añadida exitosamente.');
-      }
-      clearSessionForm();
-    } catch (e) {
-      console.error("Error adding/updating document: ", e);
-      setMessage(`Error al guardar sesión: ${e.message}`);
-    }
-  };
-
-  const handleEditSession = (session) => {
-    setEditingSessionId(session.id);
-    setSessionTitle(session.title);
-    setSessionDate(session.date);
-    setSessionTime(session.time);
-    setNotes(session.notes);
-    setCurrentSessionAttendees(session.attendees || []);
-    setSelectedSessionType(session.sessionType || '');
-    setShowSessionDetailsModal(false);
-    setMessage(`Editando sesión: "${session.title}"`);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleDeleteSession = (sessionId) => {
-    setSessionToDeleteId(sessionId);
-    setShowConfirmationModal(true);
-  };
-
-  const confirmDeleteSession = async () => {
-    if (!db || !sessionToDeleteId) return;
-    try {
-      await deleteDoc(doc(db, `artifacts/${getAppId()}/public/data/sessions`, sessionToDeleteId));
-      setMessage('Sesión eliminada exitosamente.');
-      setShowConfirmationModal(false);
-      setShowSessionDetailsModal(false);
-      setSessionToDeleteId(null);
-    } catch (e) {
-      console.error("Error deleting document: ", e);
-      setMessage(`Error al eliminar sesión: ${e.message}`);
-    }
-  };
-
-  const handleSendReminders = (session) => {
-    setMessage(`Funcionalidad de recordatorios para "${session.title}" se implementará en el futuro.`);
-  };
-
-  const handleAddTag = async () => {
-    if (!newTagName.trim()) {
-      setMessage('El nombre de la etiqueta no puede estar vacío.');
-      return;
-    }
-    if (!db || !userId) {
-      setMessage('La base de datos no está lista.');
-      return;
-    }
-
-    try {
-      await addDoc(collection(db, `artifacts/${getAppId()}/users/${userId}/tags`), {
-        name: newTagName.trim(),
-        color: newTagColor,
-        createdAt: serverTimestamp(),
-      });
-      setMessage(`Etiqueta "${newTagName}" añadida.`);
-      setNewTagName('');
-      setNewTagColor('#60A5FA');
-    } catch (e) {
-      console.error("Error adding tag: ", e);
-      setMessage(`Error al añadir etiqueta: ${e.message}`);
-    }
-  };
-
-  const handleDeleteTag = async (tagId, tagName) => {
-    if (!db || !userId) {
-      setMessage('La base de datos no está lista.');
-      return;
-    }
-    try {
-      await deleteDoc(doc(db, `artifacts/${getAppId()}/users/${userId}/tags`, tagId));
-      setMessage(`Etiqueta "${tagName}" eliminada.`);
-      if (selectedSessionType === tagName) {
-        setSelectedSessionType('');
-      }
-    } catch (e) {
-      console.error("Error deleting tag: ", e);
-      setMessage(`Error al eliminar etiqueta: ${e.message}`);
-    }
-  };
-
-  const formatMonthYear = (date) => date.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
-  const formatDay = (date) => date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
-  const formatWeek = (date) => {
-    const startOfWeek = new Date(date);
-    startOfWeek.setDate(date.getDate() - (date.getDay() === 0 ? 6 : date.getDay() - 1));
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6);
-    return `${startOfWeek.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} - ${endOfWeek.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}`;
-  };
-
-  const navigateDate = (unit, amount) => {
-    const newDate = new Date(currentDate);
-    if (unit === 'day') newDate.setDate(newDate.getDate() + amount);
-    else if (unit === 'week') newDate.setDate(newDate.getDate() + amount * 7);
-    else if (unit === 'month') newDate.setMonth(newDate.getMonth() + amount);
-    setCurrentDate(newDate);
-  };
-
-  const getFilteredSessions = () => {
-    return sessions.filter(session => {
-      const sessionDateNormalized = normalizeDate(session.date);
-      if (!sessionDateNormalized) return false;
-      const currentDateNormalized = normalizeDate(currentDate);
-
-      if (currentView === 'day') {
-        return sessionDateNormalized.getTime() === currentDateNormalized.getTime();
-      } else if (currentView === 'week') {
-        const startOfWeek = new Date(currentDateNormalized);
-        startOfWeek.setDate(currentDateNormalized.getDate() - (currentDateNormalized.getDay() === 0 ? 6 : currentDateNormalized.getDay() - 1));
-        const endOfWeek = new Date(startOfWeek);
-        endOfWeek.setDate(startOfWeek.getDate() + 6);
-        return sessionDateNormalized.getTime() >= normalizeDate(startOfWeek).getTime() && sessionDateNormalized.getTime() <= normalizeDate(endOfWeek).getTime();
-      } else if (currentView === 'month') {
-        return sessionDateNormalized.getFullYear() === currentDateNormalized.getFullYear() &&
-          sessionDateNormalized.getMonth() === currentDateNormalized.getMonth();
-      }
-      return false;
-    });
-  };
-
-  const getMonthDaysForCalendar = (date) => {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const firstDayOfMonth = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const calendarDays = [];
-    const adjustedFirstDay = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1;
-    const prevMonthLastDay = new Date(year, month, 0).getDate();
-    for (let i = adjustedFirstDay; i > 0; i--) {
-      calendarDays.push({
-        date: normalizeDate(new Date(year, month - 1, prevMonthLastDay - i + 1)),
-        isCurrentMonth: false,
-      });
-    }
-    for (let i = 1; i <= daysInMonth; i++) {
-      calendarDays.push({
-        date: normalizeDate(new Date(year, month, i)),
-        isCurrentMonth: true,
-      });
-    }
-    const remainingDays = 42 - calendarDays.length;
-    for (let i = 1; i <= remainingDays; i++) {
-      calendarDays.push({
-        date: normalizeDate(new Date(year, month + 1, i)),
-        isCurrentMonth: false,
-      });
-    }
-    return calendarDays;
-  };
-
-  const daysInCalendarGrid = useMemo(() => getMonthDaysForCalendar(currentDate), [currentDate]);
-
-  const allMonths = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-    return [
-      { value: '', label: 'Todos los meses' },
-      { value: `${currentYear}-01`, label: 'Enero' },
-      { value: `${currentYear}-02`, label: 'Febrero' },
-      { value: `${currentYear}-03`, label: 'Marzo' },
-      { value: `${currentYear}-04`, label: 'Abril' },
-      { value: `${currentYear}-05`, label: 'Mayo' },
-      { value: `${currentYear}-06`, label: 'Junio' },
-      { value: `${currentYear}-07`, label: 'Julio' },
-      { value: `${currentYear}-08`, label: 'Agosto' },
-      { value: `${currentYear}-09`, label: 'Septiembre' },
-      { value: `${currentYear}-10`, label: 'Octubre' },
-      { value: `${currentYear}-11`, label: 'Noviembre' },
-      { value: `${currentYear}-12`, label: 'Diciembre' },
-    ];
-  }, []);
-
-  const getFilteredSessionsByMonth = () => {
-    if (!selectedMonthFilter) {
-      return sessions;
-    }
-    return sessions.filter(session => {
-      const sessionDateObj = normalizeDate(session.date);
-      if (!sessionDateObj) return false;
-      const sessionYearMonth = `${sessionDateObj.getFullYear()}-${(sessionDateObj.getMonth() + 1).toString().padStart(2, '0')}`;
-      return sessionYearMonth === selectedMonthFilter;
-    });
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-rose-50 to-purple-50 flex flex-col items-center p-4 font-sans antialiased text-gray-800">
-      <div className="bg-white p-6 rounded-2xl shadow-lg w-full max-w-3xl mb-6 border border-pink-100 text-center">
-        <h2 className="text-3xl font-extrabold text-purple-700 mb-2">¡Bienvenida!</h2>
-        <p className="text-lg text-gray-600 italic">"{randomMotivationalPhrase}"</p>
-      </div>
-
-      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-3xl mb-8 border border-pink-200">
-        <h1 className="text-4xl font-extrabold text-center text-gray-800 mb-6">
-          Organizador de Sesiones
-        </h1>
-
-        {message && (
-          <div className="bg-pink-100 border border-pink-400 text-pink-700 px-4 py-3 rounded-md relative mb-4 shadow-sm" role="alert">
-            <span className="block sm:inline">{message}</span>
-          </div>
-        )}
-
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="sessionTitle" className="block text-gray-700 text-sm font-semibold mb-1">Título de la Sesión</label>
-            <input
-              type="text"
-              id="sessionTitle"
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm"
-              placeholder="Ej: Reunión de Proyecto X"
-              value={sessionTitle}
-              onChange={(e) => setSessionTitle(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="sessionDate" className="block text-gray-700 text-sm font-semibold mb-1">Fecha</label>
-              <input
-                type="date"
-                id="sessionDate"
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm"
-                value={sessionDate}
-                onChange={(e) => setSessionDate(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label htmlFor="sessionTime" className="block text-gray-700 text-sm font-semibold mb-1">Hora</label>
-              <input
-                type="time"
-                id="sessionTime"
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm"
-                value={sessionTime}
-                onChange={(e) => setSessionTime(e.target.value)}
-                required
-              />
-            </div>
-          </div>
-
-          <div className="border border-pink-200 p-4 rounded-lg bg-pink-50 shadow-inner">
-            <h3 className="text-md font-semibold text-gray-700 mb-3">Contactos de la Sesión</h3>
-            <button
-              onClick={() => setShowContactManagementModal(true)}
-              className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-3 rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2"
-            >
-              Añadir/Buscar Contactos
-            </button>
-
-            {currentSessionAttendees.length > 0 && (
-              <div className="mt-4 pt-3 border-t border-gray-200">
-                <h4 className="text-sm font-semibold text-gray-700 mb-2">Contactos Añadidos:</h4>
-                <ul className="space-y-2">
-                  {currentSessionAttendees.map((contact, index) => (
-                    <li key={index} className="flex justify-between items-center bg-gray-100 p-3 rounded-lg shadow-sm">
-                      <div className="text-sm">
-                        <p className="font-medium">{contact.name || 'Sin nombre'}</p>
-                        {contact.id && <p className="text-gray-600">Cédula: {contact.id}</p>}
-                        {contact.email && <p className="text-gray-600">Email: {contact.email}</p>}
-                        {contact.phone && <p className="text-gray-600">Celular: {contact.phone}</p>}
-                      </div>
-                      <button
-                        onClick={() => handleRemoveContactFromSession(index)}
-                        className="text-red-500 hover:text-red-700 text-xl leading-none transition-colors duration-200"
-                        title="Eliminar contacto"
-                      >
-                        &times;
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label htmlFor="notes" className="block text-gray-700 text-sm font-semibold mb-1">Notas Adicionales</label>
-            <textarea
-              id="notes"
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 h-24 resize-y shadow-sm"
-              placeholder="Detalles importantes de la sesión..."
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            ></textarea>
-          </div>
-
-          <div className="border border-pink-200 p-4 rounded-lg bg-pink-50 shadow-inner">
-            <h3 className="text-md font-semibold text-gray-700 mb-2">Tipo de Sesión</h3>
-            <div className="flex flex-col sm:flex-row gap-3 items-center">
-              <select
-                id="sessionType"
-                className="flex-grow w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm bg-white"
-                value={selectedSessionType}
-                onChange={(e) => setSelectedSessionType(e.target.value)}
-                required
-              >
-                <option value="">Selecciona un tipo de sesión</option>
-                {tags.map(tag => (
-                  <option key={tag.id} value={tag.name}>
-                    {tag.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() => {
-                  setMessage(''); // Clear previous messages before opening
-                  setShowTagManagementModal(true);
-                }}
-                className="bg-purple-700 hover:bg-purple-800 text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 w-full sm:w-auto"
-              >
-                Gestionar Etiquetas
-              </button>
-            </div>
-          </div>
-
-          <button
-            onClick={handleAddOrUpdateSession}
-            className="w-full bg-pink-600 hover:bg-pink-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:ring-offset-2"
-          >
-            {editingSessionId ? 'Actualizar Sesión' : 'Añadir Sesión'}
-          </button>
-          {editingSessionId && (
-            <button
-              onClick={clearSessionForm}
-              className="w-full bg-gray-400 hover:bg-gray-500 text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 mt-2"
-            >
-              Cancelar Edición
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-3xl mb-8 border border-pink-200">
-        <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-6">
-          Calendario de Sesiones
-        </h2>
-        <div className="flex justify-center space-x-2 mb-4">
-          <button onClick={() => setCurrentView('day')} className={`px-4 py-2 rounded-lg font-semibold transition duration-200 ${currentView === 'day' ? 'bg-pink-500 text-white shadow-md' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Día</button>
-          <button onClick={() => setCurrentView('week')} className={`px-4 py-2 rounded-lg font-semibold transition duration-200 ${currentView === 'week' ? 'bg-pink-500 text-white shadow-md' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Semana</button>
-          <button onClick={() => setCurrentView('month')} className={`px-4 py-2 rounded-lg font-semibold transition duration-200 ${currentView === 'month' ? 'bg-pink-500 text-white shadow-md' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Mes</button>
-        </div>
-
-        <div className="flex justify-between items-center mb-4">
-          <button onClick={() => navigateDate(currentView, -1)} className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors duration-200">&lt;</button>
-          <h3 className="text-xl font-semibold text-gray-700">
-            {currentView === 'day' && formatDay(currentDate)}
-            {currentView === 'week' && formatWeek(currentDate)}
-            {currentView === 'month' && formatMonthYear(currentDate)}
-          </h3>
-          <button onClick={() => navigateDate(currentView, 1)} className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors duration-200">&gt;</button>
-        </div>
-
-        {currentView === 'month' && (
-          <div className="grid grid-cols-7 gap-1 text-center text-sm">
-            {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(day => (
-              <div key={day} className="font-semibold text-gray-600 py-2 border-b border-gray-200">{day}</div>
-            ))}
-            {daysInCalendarGrid.map((dayInfo, index) => {
-              const daySessions = sessions.filter(session => {
-                const sessionDateNormalized = normalizeDate(session.date);
-                return sessionDateNormalized && dayInfo.date && sessionDateNormalized.getTime() === dayInfo.date.getTime();
-              }).sort((a, b) => a.time.localeCompare(b.time));
-
-              const isToday = dayInfo.date && dayInfo.date.toDateString() === normalizeDate(new Date()).toDateString();
-              return (
-                <div
-                  key={index}
-                  className={`relative h-28 border border-gray-100 rounded-lg p-1 overflow-y-auto ${dayInfo.isCurrentMonth ? 'bg-white' : 'bg-gray-50 text-gray-400'} ${isToday ? 'ring-2 ring-pink-500' : ''} hover:border-pink-300`}
-                  onClick={() => {
-                    if (daySessions.length > 0) {
-                      setSelectedCalendarSession(daySessions[0]);
-                      setShowSessionDetailsModal(true);
-                    }
-                  }}
-                >
-                  <span className="absolute top-1 right-2 font-semibold">{dayInfo.date.getDate()}</span>
-                  <div className="mt-6 space-y-0.5">
-                    {daySessions.map(session => {
-                      const tag = tags.find(t => t.name === session.sessionType);
-                      return (
-                        <div key={session.id} className="text-xs text-white rounded px-1 py-0.5 truncate" style={{ backgroundColor: tag ? tag.color : '#A78BFA' }} title={`${session.time} - ${session.title}`}>
-                          <span className="font-medium">{session.time}</span> - {session.title}
-                        </div>
-                      );
-                    })}
+          return (
+            <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md border border-pink-100 relative">
+                <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-3xl leading-none" title="Cerrar">&times;</button>
+                <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-6">Gestionar Etiquetas</h2>
+                {message && (
+                  <div className="bg-pink-100 border border-pink-400 text-pink-700 px-4 py-3 rounded-md relative mb-4 shadow-sm" role="alert">
+                    <span className="block sm:inline">{message}</span>
                   </div>
+                )}
+                <div className="space-y-4">
+                  <div className="flex flex-col sm:flex-row gap-3 items-end">
+                    <div className="flex-grow">
+                      <label htmlFor="modalNewTagName" className="block text-gray-700 text-sm font-semibold mb-1">Nombre de la Etiqueta</label>
+                      <input type="text" id="modalNewTagName" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm appearance-none" placeholder="Ej: Urgente, Seguimiento" value={newTagName} onChange={(e) => setNewTagName(e.target.value)} />
+                    </div>
+                    <div>
+                      <label htmlFor="modalNewTagColor" className="block text-gray-700 text-sm font-semibold mb-1">Color</label>
+                      <input type="color" id="modalNewTagColor" className="w-20 h-12 p-1 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm cursor-pointer" value={newTagColor} onChange={(e) => setNewTagColor(e.target.value)} />
+                    </div>
+                    <button onClick={handleAddTag} className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 w-full sm:w-auto">Añadir Etiqueta</button>
+                  </div>
+                  {tags.length === 0 ? (<p className="text-center text-gray-500 mt-4">No has creado ninguna etiqueta aún.</p>) : (
+                    <div className="flex flex-wrap gap-3 pt-4 border-t border-gray-100 mt-4">
+                      {tags.map(tag => (
+                        <div key={tag.id} className="flex items-center bg-gray-100 rounded-full pr-2 shadow-sm border border-gray-200">
+                          <span className="px-3 py-1 rounded-full text-white text-sm font-medium mr-2" style={{ backgroundColor: tag.color }}>{tag.name}</span>
+                          <button onClick={() => handleDeleteTag(tag.id, tag.name)} className="text-gray-500 hover:text-red-600 text-lg leading-none transition-colors duration-200" title="Eliminar etiqueta">&times;</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              );
-            })}
-          </div>
-        )}
+              </div>
+            </div>
+          );
+        };
 
-        {(currentView === 'day' || currentView === 'week') && (
-          <div className="space-y-3 mt-4">
-            {getFilteredSessions().length === 0 ? (
-              <p className="text-center text-gray-500">No hay sesiones programadas.</p>
-            ) : (
-              getFilteredSessions().map(session => (
-                <div key={session.id} className="bg-gray-50 p-4 rounded-lg shadow-sm border border-gray-200">
-                  <h4 className="text-lg font-semibold">{session.title}</h4>
-                  <p className="text-sm">Fecha: {session.date} | Hora: {session.time}</p>
+        // Modal component for managing contacts
+        const ContactManagementModal = ({ show, onClose, userId, db, onAddContactToSession, setMessage, currentSessionAttendees, getAppId }) => {
+          if (!show) return null;
+          const [searchTerm, setSearchTerm] = useState('');
+          const [foundContacts, setFoundContacts] = useState([]);
+          const [newContactName, setNewContactName] = useState('');
+          const [newContactId, setNewContactId] = useState('');
+          const [newContactEmail, setNewContactEmail] = useState('');
+          const [newContactPhone, setNewContactPhone] = useState('');
+
+          useEffect(() => {
+            if (!db || !userId || !getAppId()) return;
+            let q = db.collection(`artifacts/${getAppId()}/users/${userId}/contacts`);
+            if (searchTerm.trim()) {
+              const unsubscribe = q.onSnapshot((snapshot) => {
+                const allContacts = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
+                const lowerCaseSearchTerm = searchTerm.toLowerCase();
+                const filtered = allContacts.filter(contact =>
+                  (contact.name && contact.name.toLowerCase().includes(lowerCaseSearchTerm)) ||
+                  (contact.id && contact.id.includes(lowerCaseSearchTerm))
+                );
+                setFoundContacts(filtered);
+              }, (error) => {
+                console.error("Error searching contacts:", error);
+                setMessage(`Error al buscar contactos: ${error.message}`);
+              });
+              return () => unsubscribe();
+            } else {
+              setFoundContacts([]);
+            }
+          }, [searchTerm, db, userId, setMessage, getAppId]);
+
+          const handleAddNewContact = async () => {
+            if (!newContactName.trim() && !newContactEmail.trim() && !newContactPhone.trim()) {
+              setMessage('Por favor, ingresa al menos el nombre, email o teléfono para el nuevo contacto.');
+              return;
+            }
+            if (newContactId.trim() && !/^\d{9}$/.test(newContactId.trim())) {
+              setMessage('El formato de la Cédula debe ser 9 dígitos numéricos (ej: 503400393).');
+              return;
+            }
+            if (!db || !userId || !getAppId()) {
+              setMessage('La base de datos o el ID de usuario no están listos.');
+              return;
+            }
+            const contactData = { name: newContactName.trim(), id: newContactId.trim(), email: newContactEmail.trim(), phone: newContactPhone.trim() };
+            try {
+              const docRef = await db.collection(`artifacts/${getAppId()}/users/${userId}/contacts`).add(contactData);
+              setMessage('Nuevo contacto guardado y añadido a la sesión.');
+              onAddContactToSession({ ...contactData, docId: docRef.id });
+              setNewContactName(''); setNewContactId(''); setNewContactEmail(''); setNewContactPhone('');
+            } catch (e) {
+              console.error("Error adding new contact:", e);
+              setMessage(`Error al guardar nuevo contacto: ${e.message}`);
+            }
+          };
+
+          const handleSelectExistingContact = (contact) => {
+            const isDuplicate = currentSessionAttendees.some(att => att.docId === contact.docId);
+            if (isDuplicate) {
+              setMessage('Este contacto ya ha sido añadido a la sesión.');
+              return;
+            }
+            onAddContactToSession(contact);
+            setMessage(`Contacto "${contact.name}" añadido a la sesión.`);
+          };
+
+          return (
+            <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-2xl border border-pink-100 relative">
+                <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-3xl leading-none" title="Cerrar">&times;</button>
+                <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-6">Gestionar Contactos</h2>
+                <div className="border border-pink-200 p-4 rounded-lg bg-pink-50 shadow-inner mb-6">
+                  <h3 className="text-md font-semibold text-gray-700 mb-3">Buscar Contacto Existente</h3>
+                  <input type="text" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm appearance-none mb-3" placeholder="Buscar por nombre o cédula..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                  {foundContacts.length > 0 && (
+                    <div className="max-h-48 overflow-y-auto custom-scrollbar border border-gray-200 rounded-lg bg-white">
+                      {foundContacts.map(contact => (
+                        <div key={contact.docId} className="flex justify-between items-center p-3 border-b border-gray-100 last:border-b-0">
+                          <div className="text-sm">
+                            <p className="font-medium">{contact.name}</p>
+                            {contact.id && <p className="text-gray-600 text-xs">Cédula: {contact.id}</p>}
+                            {contact.email && <p className="text-gray-600 text-xs">Email: {contact.email}</p>}
+                            {contact.phone && <p className="text-gray-600 text-xs">Celular: {contact.phone}</p>}
+                          </div>
+                          <button onClick={() => handleSelectExistingContact(contact)} className="bg-purple-500 hover:bg-purple-600 text-white text-sm py-1.5 px-3 rounded-lg shadow-md transition duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2">Añadir</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {searchTerm.trim() && foundContacts.length === 0 && (<p className="text-center text-gray-500 text-sm mt-2">No se encontraron contactos.</p>)}
                 </div>
-              ))
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-3xl mb-8 border border-pink-200">
-        <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-6">
-          Todas las Sesiones
-        </h2>
-        <div className="mb-4 flex justify-center items-center">
-          <label htmlFor="monthFilter" className="block text-gray-700 text-sm font-semibold mr-2">Filtrar por Mes:</label>
-          <select
-            id="monthFilter"
-            className="p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400"
-            value={selectedMonthFilter}
-            onChange={(e) => setSelectedMonthFilter(e.target.value)}
-          >
-            {allMonths.map(month => (
-              <option key={month.value} value={month.value}>{month.label}</option>
-            ))}
-          </select>
-        </div>
-        <div className="space-y-4">
-          {getFilteredSessionsByMonth().length === 0 ? (
-            <p className="text-center text-gray-500">No hay sesiones para el mes seleccionado.</p>
-          ) : (
-            getFilteredSessionsByMonth().map((session) => (
-              <div key={session.id} className="bg-pink-50 p-5 rounded-xl shadow-sm border border-pink-100 flex flex-col md:flex-row justify-between items-start md:items-center">
-                <div className="mb-3 md:mb-0 flex-grow">
-                  <h3 className="text-xl font-semibold text-gray-800">{session.title}</h3>
-                  <p className="text-gray-600 text-sm">
-                    Fecha: <span className="font-medium">{session.date}</span> | Hora: <span className="font-medium">{session.time}</span>
-                  </p>
-
-                  {session.sessionType && (() => {
-                    const tag = tags.find(t => t.name === session.sessionType);
-                    return tag ? (
-                        <span
-                            className="mt-2 inline-block px-2 py-0.5 rounded-full text-white text-xs font-medium"
-                            style={{ backgroundColor: tag.color }}
-                        >
-                            {tag.name}
-                        </span>
-                    ) : null;
-                  })()}
-
+                <div className="border border-pink-200 p-4 rounded-lg bg-pink-50 shadow-inner">
+                  <h3 className="text-md font-semibold text-gray-700 mb-3">Añadir Nuevo Contacto</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <label htmlFor="modalNewContactName" className="block text-gray-700 text-xs font-semibold mb-1">Nombre Completo</label>
+                      <input type="text" id="modalNewContactName" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-pink-300 focus:border-transparent text-sm" placeholder="Nombre y Apellidos" value={newContactName} onChange={(e) => setNewContactName(e.target.value)} />
+                    </div>
+                    <div>
+                      <label htmlFor="modalNewContactId" className="block text-gray-700 text-xs font-semibold mb-1">Cédula (9 dígitos)</label>
+                      <input type="text" id="modalNewContactId" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-pink-300 focus:border-transparent text-sm" placeholder="Ej: 503400393" value={newContactId} onChange={(e) => setNewContactId(e.target.value.replace(/\D/g, '').slice(0, 9))} maxLength="9" />
+                    </div>
+                    <div>
+                      <label htmlFor="modalNewContactEmail" className="block text-gray-700 text-xs font-semibold mb-1">Email</label>
+                      <input type="email" id="modalNewContactEmail" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-pink-300 focus:border-transparent text-sm" placeholder="contacto@ejemplo.com" value={newContactEmail} onChange={(e) => setNewContactEmail(e.target.value)} />
+                    </div>
+                    <div>
+                      <label htmlFor="modalNewContactPhone" className="block text-gray-700 text-xs font-semibold mb-1">Celular</label>
+                      <input type="tel" id="modalNewContactPhone" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-pink-300 focus:border-transparent text-sm" placeholder="Ej: +50612345678" value={newContactPhone} onChange={(e) => setNewContactPhone(e.target.value)} />
+                    </div>
+                  </div>
+                  <button onClick={handleAddNewContact} className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-3 rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2">Guardar y Añadir a Sesión</button>
+                </div>
+              </div>
+            </div>
+          );
+        };
+        
+        // Modal for displaying session details
+        const SessionDetailsModal = ({ show, onClose, session, tags, onEditSession, onDeleteSession }) => {
+          if (!show || !session) return null;
+          const tag = tags.find(t => t.name === session.sessionType);
+          return (
+            <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md border border-pink-100 relative">
+                <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-3xl leading-none" title="Cerrar">&times;</button>
+                <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-6">Detalles de la Sesión</h2>
+                <div className="space-y-3 text-gray-700">
+                  <p><span className="font-semibold">Título:</span> {session.title}</p>
+                  <p><span className="font-semibold">Fecha:</span> {session.date}</p>
+                  <p><span className="font-semibold">Hora:</span> {session.time}</p>
                   {session.attendees && session.attendees.length > 0 && (
-                    <div className="mt-2">
-                      <p className="text-gray-600 text-sm font-semibold">Asistentes:</p>
-                      <ul className="list-disc list-inside ml-2 text-sm text-gray-600">
-                        {session.attendees.map((contact, index) => (
+                    <div>
+                      <p className="font-semibold">Asistentes:</p>
+                      <ul className="list-disc list-inside ml-4 text-sm">
+                        {session.attendees.map((att, index) => (
                           <li key={index}>
-                            {contact.name || 'Contacto sin nombre'}
-                            {contact.id && ` (Cédula: ${contact.id})`}
+                            {att.name || att.email || att.phone}
+                            {att.id && ` (Cédula: ${att.id})`}
+                            {att.email && att.name && ` | Email: ${att.email}`}
+                            {att.phone && att.name && ` | Celular: ${att.phone}`}
                           </li>
                         ))}
                       </ul>
                     </div>
                   )}
-
-                  {session.notes && <p className="text-gray-600 text-sm italic mt-2">Notas: {session.notes}</p>}
+                  {session.sessionType && tag && (<p className="font-semibold">Tipo: <span className="ml-2 px-2 py-0.5 rounded-full text-white text-sm" style={{ backgroundColor: tag.color }}>{tag.name}</span></p>)}
+                  {session.notes && <p><span className="font-semibold">Notas:</span> {session.notes}</p>}
                 </div>
-                <div className="flex flex-col space-y-2 self-start md:self-center mt-3 md:mt-0">
-                  <button onClick={() => handleSendReminders(session)} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg shadow-md text-sm">Enviar Recordatorios</button>
+                <div className="flex justify-end mt-6 space-x-3">
+                  <button onClick={() => { onEditSession(session); onClose(); }} className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2">Modificar Sesión</button>
+                  <button onClick={() => onDeleteSession(session.id)} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2">Eliminar Sesión</button>
+                  <button onClick={onClose} className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2">Cerrar</button>
                 </div>
               </div>
-            ))
-          )}
-        </div>
-      </div>
+            </div>
+          );
+        };
 
-      {/* --- MODALS --- */}
-      <TagManagementModal
-        show={showTagManagementModal}
-        onClose={() => setShowTagManagementModal(false)}
-        tags={tags}
-        newTagName={newTagName}
-        setNewTagName={setNewTagName}
-        newTagColor={newTagColor}
-        setNewTagColor={setNewTagColor}
-        handleAddTag={handleAddTag}
-        handleDeleteTag={handleDeleteTag}
-        message={message}
-      />
+        // Confirmation Modal for deletion
+        const ConfirmationModal = ({ show, onClose, onConfirm, message }) => {
+          if (!show) return null;
+          return (
+            <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm border border-red-300 relative">
+                <h2 className="text-2xl font-bold text-center text-red-700 mb-4">Confirmar Eliminación</h2>
+                <p className="text-gray-700 text-center mb-6">{message}</p>
+                <div className="flex justify-center space-x-4">
+                  <button onClick={onConfirm} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2">Sí, Eliminar</button>
+                  <button onClick={onClose} className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2">No, Cancelar</button>
+                </div>
+              </div>
+            </div>
+          );
+        };
 
-      <ContactManagementModal
-        show={showContactManagementModal}
-        onClose={() => setShowContactManagementModal(false)}
-        userId={userId}
-        db={db}
-        onAddContactToSession={handleAddContactToSessionList}
-        setMessage={setMessage}
-        currentSessionAttendees={currentSessionAttendees}
-        getAppId={getAppId}
-      />
+        function App() {
+          const [sessionTitle, setSessionTitle] = useState('');
+          const [sessionDate, setSessionDate] = useState('');
+          const [sessionTime, setSessionTime] = useState('');
+          const [notes, setNotes] = useState('');
+          const [sessions, setSessions] = useState([]);
+          const [userId, setUserId] = useState(null);
+          const [db, setDb] = useState(null);
+          const [auth, setAuth] = useState(null);
+          const [isAuthReady, setIsAuthReady] = useState(false);
+          const [message, setMessage] = useState('');
+          const [currentSessionAttendees, setCurrentSessionAttendees] = useState([]);
+          const [editingSessionId, setEditingSessionId] = useState(null);
+          const motivationalPhrases = useMemo(() => ["El éxito es la suma de pequeños esfuerzos repetidos día tras día.", "Cree en ti mismo y todo será posible.", "La única forma de hacer un gran trabajo es amar lo que haces.", "No te rindas, el principio es siempre lo más difícil.", "Cada día es una nueva oportunidad para cambiar tu vida."], []);
+          const [randomMotivationalPhrase, setRandomMotivationalPhrase] = useState('');
+          const [currentView, setCurrentView] = useState('month');
+          const [currentDate, setCurrentDate] = useState(new Date());
+          const [selectedCalendarSession, setSelectedCalendarSession] = useState(null);
+          const [showSessionDetailsModal, setShowSessionDetailsModal] = useState(false);
+          const [showConfirmationModal, setShowConfirmationModal] = useState(false);
+          const [sessionToDeleteId, setSessionToDeleteId] = useState(null);
+          const [tags, setTags] = useState([]);
+          const [newTagName, setNewTagName] = useState('');
+          const [newTagColor, setNewTagColor] = useState('#60A5FA');
+          const [selectedSessionType, setSelectedSessionType] = useState('');
+          const [showTagManagementModal, setShowTagManagementModal] = useState(false);
+          const [showContactManagementModal, setShowContactManagementModal] = useState(false);
+          const [selectedMonthFilter, setSelectedMonthFilter] = useState('');
 
-      <SessionDetailsModal
-        show={showSessionDetailsModal}
-        onClose={() => setShowSessionDetailsModal(false)}
-        session={selectedCalendarSession}
-        tags={tags}
-        onEditSession={handleEditSession}
-        onDeleteSession={handleDeleteSession}
-      />
+          const getAppId = () => typeof __app_id !== 'undefined' ? __app_id : 'gestion-de-sesiones-38ea4';
 
-      <ConfirmationModal
-        show={showConfirmationModal}
-        onClose={() => setShowConfirmationModal(false)}
-        onConfirm={confirmDeleteSession}
-        message="¿Estás seguro de que quieres eliminar esta sesión? Esta acción no se puede deshacer."
-      />
-    </div>
-  );
-}
+          useEffect(() => {
+            try {
+              const localFirebaseConfig = { apiKey: "YOUR_API_KEY", authDomain: "gestion-de-sesiones-38ea4.firebaseapp.com", projectId: "gestion-de-sesiones-38ea4", storageBucket: "gestion-de-sesiones-38ea4.appspot.com", messagingSenderId: "210978558947", appId: "1:210978558947:web:f502ff67648ce50b1846d6" };
+              const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : localFirebaseConfig;
+              
+              firebase.initializeApp(firebaseConfig);
+              const firestoreDb = firebase.firestore();
+              const firebaseAuth = firebase.auth();
 
-export default App;
+              setDb(firestoreDb);
+              setAuth(firebaseAuth);
+
+              firebaseAuth.onAuthStateChanged(async (user) => {
+                if (user) {
+                  setUserId(user.uid);
+                } else {
+                  try {
+                    if (typeof __initial_auth_token !== 'undefined') {
+                      await firebaseAuth.signInWithCustomToken(__initial_auth_token);
+                    } else {
+                      await firebaseAuth.signInAnonymously();
+                    }
+                  } catch (error) {
+                    console.error("Error signing in:", error);
+                    setMessage(`Error al iniciar sesión: ${error.message}`);
+                  }
+                }
+                setIsAuthReady(true);
+              });
+              setRandomMotivationalPhrase(motivationalPhrases[Math.floor(Math.random() * motivationalPhrases.length)]);
+            } catch (error) {
+              console.error("Failed to initialize Firebase:", error);
+              setMessage(`Error al inicializar Firebase: ${error.message}`);
+            }
+          }, [motivationalPhrases]);
+
+          useEffect(() => {
+            if (db && userId && isAuthReady) {
+              const q = db.collection(`artifacts/${getAppId()}/public/data/sessions`);
+              const unsubscribe = q.onSnapshot((snapshot) => {
+                const fetchedSessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                fetchedSessions.sort((a, b) => (a.createdAt?.toDate() || 0) - (b.createdAt?.toDate() || 0));
+                setSessions(fetchedSessions);
+              }, (error) => {
+                console.error("Error fetching sessions:", error);
+                setMessage(`Error al cargar sesiones: ${error.message}`);
+              });
+              return () => unsubscribe();
+            }
+          }, [db, userId, isAuthReady]);
+
+          useEffect(() => {
+            if (db && userId && isAuthReady) {
+              const q = db.collection(`artifacts/${getAppId()}/users/${userId}/tags`);
+              const unsubscribe = q.onSnapshot((snapshot) => {
+                const fetchedTags = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                setTags(fetchedTags);
+              }, (error) => {
+                console.error("Error fetching tags:", error);
+                setMessage(`Error al cargar etiquetas: ${error.message}`);
+              });
+              return () => unsubscribe();
+            }
+          }, [db, userId, isAuthReady]);
+
+          const handleAddContactToSessionList = (contact) => {
+            if (currentSessionAttendees.some(att => att.docId === contact.docId)) {
+              setMessage('Este contacto ya ha sido añadido a la sesión.');
+              return;
+            }
+            setCurrentSessionAttendees(prev => [...prev, contact]);
+            setMessage(`Contacto "${contact.name || contact.email || contact.phone}" añadido a la sesión.`);
+          };
+
+          const handleRemoveContactFromSession = (indexToRemove) => {
+            setCurrentSessionAttendees(prev => prev.filter((_, index) => index !== indexToRemove));
+            setMessage('Contacto eliminado de la lista de la sesión.');
+          };
+
+          const clearSessionForm = () => {
+            setSessionTitle(''); setSessionDate(''); setSessionTime(''); setNotes('');
+            setCurrentSessionAttendees([]); setSelectedSessionType(''); setEditingSessionId(null);
+          };
+
+          const handleAddOrUpdateSession = async () => {
+            if (!sessionTitle || !sessionDate || !sessionTime || !selectedSessionType || currentSessionAttendees.length === 0) {
+              setMessage('Por favor, completa todos los campos requeridos y añade al menos un contacto.');
+              return;
+            }
+            if (!db || !userId) {
+              setMessage('La base de datos no está lista. Inténtalo de nuevo.');
+              return;
+            }
+            const sessionData = { title: sessionTitle, date: sessionDate, time: sessionTime, attendees: currentSessionAttendees, notes: notes, sessionType: selectedSessionType, createdBy: userId };
+            try {
+              if (editingSessionId) {
+                await db.doc(`artifacts/${getAppId()}/public/data/sessions/${editingSessionId}`).update({ ...sessionData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+                setMessage('Sesión actualizada exitosamente.');
+              } else {
+                await db.collection(`artifacts/${getAppId()}/public/data/sessions`).add({ ...sessionData, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+                setMessage('Sesión añadida exitosamente.');
+              }
+              clearSessionForm();
+            } catch (e) {
+              console.error("Error adding/updating document: ", e);
+              setMessage(`Error al guardar sesión: ${e.message}`);
+            }
+          };
+
+          const handleEditSession = (session) => {
+            setEditingSessionId(session.id); setSessionTitle(session.title); setSessionDate(session.date); setSessionTime(session.time); setNotes(session.notes);
+            setCurrentSessionAttendees(session.attendees || []); setSelectedSessionType(session.sessionType || ''); setShowSessionDetailsModal(false);
+            setMessage(`Editando sesión: "${session.title}"`); window.scrollTo({ top: 0, behavior: 'smooth' });
+          };
+
+          const handleDeleteSession = (sessionId) => {
+            setSessionToDeleteId(sessionId); setShowConfirmationModal(true);
+          };
+
+          const confirmDeleteSession = async () => {
+            if (!db || !sessionToDeleteId) return;
+            try {
+              await db.doc(`artifacts/${getAppId()}/public/data/sessions/${sessionToDeleteId}`).delete();
+              setMessage('Sesión eliminada exitosamente.'); setShowConfirmationModal(false); setShowSessionDetailsModal(false); setSessionToDeleteId(null);
+            } catch (e) {
+              console.error("Error deleting document: ", e);
+              setMessage(`Error al eliminar sesión: ${e.message}`);
+            }
+          };
+
+          const handleSendReminders = (session) => {
+            setMessage(`Funcionalidad de recordatorios para "${session.title}" se implementará en el futuro.`);
+          };
+
+          const handleAddTag = async () => {
+            if (!newTagName.trim()) {
+              setMessage('El nombre de la etiqueta no puede estar vacío.');
+              return;
+            }
+            if (!db || !userId) {
+              setMessage('La base de datos no está lista.');
+              return;
+            }
+            try {
+              await db.collection(`artifacts/${getAppId()}/users/${userId}/tags`).add({ name: newTagName.trim(), color: newTagColor, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+              setMessage(`Etiqueta "${newTagName}" añadida.`); setNewTagName(''); setNewTagColor('#60A5FA');
+            } catch (e) {
+              console.error("Error adding tag: ", e);
+              setMessage(`Error al añadir etiqueta: ${e.message}`);
+            }
+          };
+
+          const handleDeleteTag = async (tagId, tagName) => {
+            if (!db || !userId) {
+              setMessage('La base de datos no está lista.');
+              return;
+            }
+            try {
+              await db.doc(`artifacts/${getAppId()}/users/${userId}/tags/${tagId}`).delete();
+              setMessage(`Etiqueta "${tagName}" eliminada.`);
+              if (selectedSessionType === tagName) {
+                setSelectedSessionType('');
+              }
+            } catch (e) {
+              console.error("Error deleting tag: ", e);
+              setMessage(`Error al eliminar etiqueta: ${e.message}`);
+            }
+          };
+
+          const formatMonthYear = (date) => date.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+          const formatDay = (date) => date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+          const formatWeek = (date) => {
+            const startOfWeek = new Date(date);
+            startOfWeek.setDate(date.getDate() - (date.getDay() === 0 ? 6 : date.getDay() - 1));
+            const endOfWeek = new Date(startOfWeek);
+            endOfWeek.setDate(startOfWeek.getDate() + 6);
+            return `${startOfWeek.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} - ${endOfWeek.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+          };
+
+          const navigateDate = (unit, amount) => {
+            const newDate = new Date(currentDate);
+            if (unit === 'day') newDate.setDate(newDate.getDate() + amount);
+            else if (unit === 'week') newDate.setDate(newDate.getDate() + amount * 7);
+            else if (unit === 'month') newDate.setMonth(newDate.getMonth() + amount);
+            setCurrentDate(newDate);
+          };
+
+          const getFilteredSessions = () => {
+            return sessions.filter(session => {
+              const sessionDateNormalized = normalizeDate(session.date);
+              if (!sessionDateNormalized) return false;
+              const currentDateNormalized = normalizeDate(currentDate);
+              if (currentView === 'day') {
+                return sessionDateNormalized.getTime() === currentDateNormalized.getTime();
+              } else if (currentView === 'week') {
+                const startOfWeek = new Date(currentDateNormalized);
+                startOfWeek.setDate(currentDateNormalized.getDate() - (currentDateNormalized.getDay() === 0 ? 6 : currentDateNormalized.getDay() - 1));
+                const endOfWeek = new Date(startOfWeek);
+                endOfWeek.setDate(startOfWeek.getDate() + 6);
+                return sessionDateNormalized.getTime() >= normalizeDate(startOfWeek).getTime() && sessionDateNormalized.getTime() <= normalizeDate(endOfWeek).getTime();
+              } else if (currentView === 'month') {
+                return sessionDateNormalized.getFullYear() === currentDateNormalized.getFullYear() && sessionDateNormalized.getMonth() === currentDateNormalized.getMonth();
+              }
+              return false;
+            });
+          };
+
+          const getMonthDaysForCalendar = (date) => {
+            const year = date.getFullYear(); const month = date.getMonth();
+            const firstDayOfMonth = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const calendarDays = []; const adjustedFirstDay = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1;
+            const prevMonthLastDay = new Date(year, month, 0).getDate();
+            for (let i = adjustedFirstDay; i > 0; i--) { calendarDays.push({ date: normalizeDate(new Date(year, month - 1, prevMonthLastDay - i + 1)), isCurrentMonth: false }); }
+            for (let i = 1; i <= daysInMonth; i++) { calendarDays.push({ date: normalizeDate(new Date(year, month, i)), isCurrentMonth: true }); }
+            const remainingDays = 42 - calendarDays.length;
+            for (let i = 1; i <= remainingDays; i++) { calendarDays.push({ date: normalizeDate(new Date(year, month + 1, i)), isCurrentMonth: false }); }
+            return calendarDays;
+          };
+
+          const daysInCalendarGrid = useMemo(() => getMonthDaysForCalendar(currentDate), [currentDate]);
+
+          const allMonths = useMemo(() => {
+            const currentYear = new Date().getFullYear();
+            return [ { value: '', label: 'Todos los meses' }, { value: `${currentYear}-01`, label: 'Enero' }, { value: `${currentYear}-02`, label: 'Febrero' }, { value: `${currentYear}-03`, label: 'Marzo' }, { value: `${currentYear}-04`, label: 'Abril' }, { value: `${currentYear}-05`, label: 'Mayo' }, { value: `${currentYear}-06`, label: 'Junio' }, { value: `${currentYear}-07`, label: 'Julio' }, { value: `${currentYear}-08`, label: 'Agosto' }, { value: `${currentYear}-09`, label: 'Septiembre' }, { value: `${currentYear}-10`, label: 'Octubre' }, { value: `${currentYear}-11`, label: 'Noviembre' }, { value: `${currentYear}-12`, label: 'Diciembre' } ];
+          }, []);
+
+          const getFilteredSessionsByMonth = () => {
+            if (!selectedMonthFilter) { return sessions; }
+            return sessions.filter(session => {
+              const sessionDateObj = normalizeDate(session.date);
+              if (!sessionDateObj) return false;
+              const sessionYearMonth = `${sessionDateObj.getFullYear()}-${(sessionDateObj.getMonth() + 1).toString().padStart(2, '0')}`;
+              return sessionYearMonth === selectedMonthFilter;
+            });
+          };
+
+          return (
+            <div className="min-h-screen bg-gradient-to-br from-rose-50 to-purple-50 flex flex-col items-center p-4 font-sans antialiased text-gray-800">
+              <div className="bg-white p-6 rounded-2xl shadow-lg w-full max-w-3xl mb-6 border border-pink-100 text-center">
+                <h2 className="text-3xl font-extrabold text-purple-700 mb-2">¡Bienvenida!</h2>
+                <p className="text-lg text-gray-600 italic">"{randomMotivationalPhrase}"</p>
+              </div>
+
+              <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-3xl mb-8 border border-pink-200">
+                <h1 className="text-4xl font-extrabold text-center text-gray-800 mb-6">Organizador de Sesiones</h1>
+                {message && (<div className="bg-pink-100 border border-pink-400 text-pink-700 px-4 py-3 rounded-md relative mb-4 shadow-sm" role="alert"><span className="block sm:inline">{message}</span></div>)}
+                <div className="space-y-4">
+                  <div>
+                    <label htmlFor="sessionTitle" className="block text-gray-700 text-sm font-semibold mb-1">Título de la Sesión</label>
+                    <input type="text" id="sessionTitle" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm" placeholder="Ej: Reunión de Proyecto X" value={sessionTitle} onChange={(e) => setSessionTitle(e.target.value)} required />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="sessionDate" className="block text-gray-700 text-sm font-semibold mb-1">Fecha</label>
+                      <input type="date" id="sessionDate" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm" value={sessionDate} onChange={(e) => setSessionDate(e.target.value)} required />
+                    </div>
+                    <div>
+                      <label htmlFor="sessionTime" className="block text-gray-700 text-sm font-semibold mb-1">Hora</label>
+                      <input type="time" id="sessionTime" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm" value={sessionTime} onChange={(e) => setSessionTime(e.target.value)} required />
+                    </div>
+                  </div>
+                  <div className="border border-pink-200 p-4 rounded-lg bg-pink-50 shadow-inner">
+                    <h3 className="text-md font-semibold text-gray-700 mb-3">Contactos de la Sesión</h3>
+                    <button onClick={() => setShowContactManagementModal(true)} className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-3 rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2">Añadir/Buscar Contactos</button>
+                    {currentSessionAttendees.length > 0 && (
+                      <div className="mt-4 pt-3 border-t border-gray-200">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">Contactos Añadidos:</h4>
+                        <ul className="space-y-2">
+                          {currentSessionAttendees.map((contact, index) => (
+                            <li key={index} className="flex justify-between items-center bg-gray-100 p-3 rounded-lg shadow-sm">
+                              <div className="text-sm">
+                                <p className="font-medium">{contact.name || 'Sin nombre'}</p>
+                                {contact.id && <p className="text-gray-600">Cédula: {contact.id}</p>}
+                                {contact.email && <p className="text-gray-600">Email: {contact.email}</p>}
+                                {contact.phone && <p className="text-gray-600">Celular: {contact.phone}</p>}
+                              </div>
+                              <button onClick={() => handleRemoveContactFromSession(index)} className="text-red-500 hover:text-red-700 text-xl leading-none transition-colors duration-200" title="Eliminar contacto">&times;</button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label htmlFor="notes" className="block text-gray-700 text-sm font-semibold mb-1">Notas Adicionales</label>
+                    <textarea id="notes" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 h-24 resize-y shadow-sm" placeholder="Detalles importantes de la sesión..." value={notes} onChange={(e) => setNotes(e.target.value)}></textarea>
+                  </div>
+                  <div className="border border-pink-200 p-4 rounded-lg bg-pink-50 shadow-inner">
+                    <h3 className="text-md font-semibold text-gray-700 mb-2">Tipo de Sesión</h3>
+                    <div className="flex flex-col sm:flex-row gap-3 items-center">
+                      <select id="sessionType" className="flex-grow w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400 focus:border-transparent transition duration-200 shadow-sm bg-white" value={selectedSessionType} onChange={(e) => setSelectedSessionType(e.target.value)} required>
+                        <option value="">Selecciona un tipo de sesión</option>
+                        {tags.map(tag => (<option key={tag.id} value={tag.name}>{tag.name}</option>))}
+                      </select>
+                      <button onClick={() => { setMessage(''); setShowTagManagementModal(true); }} className="bg-purple-700 hover:bg-purple-800 text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 w-full sm:w-auto">Gestionar Etiquetas</button>
+                    </div>
+                  </div>
+                  <button onClick={handleAddOrUpdateSession} className="w-full bg-pink-600 hover:bg-pink-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:ring-offset-2">{editingSessionId ? 'Actualizar Sesión' : 'Añadir Sesión'}</button>
+                  {editingSessionId && (<button onClick={clearSessionForm} className="w-full bg-gray-400 hover:bg-gray-500 text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 mt-2">Cancelar Edición</button>)}
+                </div>
+              </div>
+
+              <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-3xl mb-8 border border-pink-200">
+                <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-6">Calendario de Sesiones</h2>
+                <div className="flex justify-center space-x-2 mb-4">
+                  <button onClick={() => setCurrentView('day')} className={`px-4 py-2 rounded-lg font-semibold transition duration-200 ${currentView === 'day' ? 'bg-pink-500 text-white shadow-md' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Día</button>
+                  <button onClick={() => setCurrentView('week')} className={`px-4 py-2 rounded-lg font-semibold transition duration-200 ${currentView === 'week' ? 'bg-pink-500 text-white shadow-md' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Semana</button>
+                  <button onClick={() => setCurrentView('month')} className={`px-4 py-2 rounded-lg font-semibold transition duration-200 ${currentView === 'month' ? 'bg-pink-500 text-white shadow-md' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>Mes</button>
+                </div>
+                <div className="flex justify-between items-center mb-4">
+                  <button onClick={() => navigateDate(currentView, -1)} className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors duration-200">&lt;</button>
+                  <h3 className="text-xl font-semibold text-gray-700">
+                    {currentView === 'day' && formatDay(currentDate)}
+                    {currentView === 'week' && formatWeek(currentDate)}
+                    {currentView === 'month' && formatMonthYear(currentDate)}
+                  </h3>
+                  <button onClick={() => navigateDate(currentView, 1)} className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors duration-200">&gt;</button>
+                </div>
+                {currentView === 'month' && (
+                  <div className="grid grid-cols-7 gap-1 text-center text-sm">
+                    {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(day => (<div key={day} className="font-semibold text-gray-600 py-2 border-b border-gray-200">{day}</div>))}
+                    {daysInCalendarGrid.map((dayInfo, index) => {
+                      const daySessions = sessions.filter(session => { const sessionDateNormalized = normalizeDate(session.date); return sessionDateNormalized && dayInfo.date && sessionDateNormalized.getTime() === dayInfo.date.getTime(); }).sort((a, b) => a.time.localeCompare(b.time));
+                      const isToday = dayInfo.date && dayInfo.date.toDateString() === normalizeDate(new Date()).toDateString();
+                      return (
+                        <div key={index} className={`relative h-28 border border-gray-100 rounded-lg p-1 overflow-y-auto ${dayInfo.isCurrentMonth ? 'bg-white' : 'bg-gray-50 text-gray-400'} ${isToday ? 'ring-2 ring-pink-500' : ''} hover:border-pink-300`} onClick={() => { if (daySessions.length > 0) { setSelectedCalendarSession(daySessions[0]); setShowSessionDetailsModal(true); } }}>
+                          <span className="absolute top-1 right-2 font-semibold">{dayInfo.date.getDate()}</span>
+                          <div className="mt-6 space-y-0.5">
+                            {daySessions.map(session => {
+                              const tag = tags.find(t => t.name === session.sessionType);
+                              return (<div key={session.id} className="text-xs text-white rounded px-1 py-0.5 truncate" style={{ backgroundColor: tag ? tag.color : '#A78BFA' }} title={`${session.time} - ${session.title}`}><span className="font-medium">{session.time}</span> - {session.title}</div>);
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {(currentView === 'day' || currentView === 'week') && (
+                  <div className="space-y-3 mt-4">
+                    {getFilteredSessions().length === 0 ? (<p className="text-center text-gray-500">No hay sesiones programadas.</p>) : (getFilteredSessions().map(session => (
+                      <div key={session.id} className="bg-gray-50 p-4 rounded-lg shadow-sm border border-gray-200">
+                        <h4 className="text-lg font-semibold">{session.title}</h4>
+                        <p className="text-sm">Fecha: {session.date} | Hora: {session.time}</p>
+                      </div>
+                    )))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-3xl mb-8 border border-pink-200">
+                <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-6">Todas las Sesiones</h2>
+                <div className="mb-4 flex justify-center items-center">
+                  <label htmlFor="monthFilter" className="block text-gray-700 text-sm font-semibold mr-2">Filtrar por Mes:</label>
+                  <select id="monthFilter" className="p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-400" value={selectedMonthFilter} onChange={(e) => setSelectedMonthFilter(e.target.value)}>
+                    {allMonths.map(month => (<option key={month.value} value={month.value}>{month.label}</option>))}
+                  </select>
+                </div>
+                <div className="space-y-4">
+                  {getFilteredSessionsByMonth().length === 0 ? (<p className="text-center text-gray-500">No hay sesiones para el mes seleccionado.</p>) : (
+                    getFilteredSessionsByMonth().map((session) => (
+                      <div key={session.id} className="bg-pink-50 p-5 rounded-xl shadow-sm border border-pink-100 flex flex-col md:flex-row justify-between items-start md:items-center">
+                        <div className="mb-3 md:mb-0 flex-grow">
+                          <h3 className="text-xl font-semibold text-gray-800">{session.title}</h3>
+                          <p className="text-gray-600 text-sm">Fecha: <span className="font-medium">{session.date}</span> | Hora: <span className="font-medium">{session.time}</span></p>
+                          {session.sessionType && (() => { const tag = tags.find(t => t.name === session.sessionType); return tag ? (<span className="mt-2 inline-block px-2 py-0.5 rounded-full text-white text-xs font-medium" style={{ backgroundColor: tag.color }}>{tag.name}</span>) : null; })()}
+                          {session.attendees && session.attendees.length > 0 && (
+                            <div className="mt-2">
+                              <p className="text-gray-600 text-sm font-semibold">Asistentes:</p>
+                              <ul className="list-disc list-inside ml-2 text-sm text-gray-600">
+                                {session.attendees.map((contact, index) => (<li key={index}>{contact.name || 'Contacto sin nombre'}{contact.id && ` (Cédula: ${contact.id})`}</li>))}
+                              </ul>
+                            </div>
+                          )}
+                          {session.notes && <p className="text-gray-600 text-sm italic mt-2">Notas: {session.notes}</p>}
+                        </div>
+                        <div className="flex flex-col space-y-2 self-start md:self-center mt-3 md:mt-0">
+                          <button onClick={() => handleSendReminders(session)} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg shadow-md text-sm">Enviar Recordatorios</button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <TagManagementModal show={showTagManagementModal} onClose={() => setShowTagManagementModal(false)} tags={tags} newTagName={newTagName} setNewTagName={setNewTagName} newTagColor={newTagColor} setNewTagColor={setNewTagColor} handleAddTag={handleAddTag} handleDeleteTag={handleDeleteTag} message={message} />
+              <ContactManagementModal show={showContactManagementModal} onClose={() => setShowContactManagementModal(false)} userId={userId} db={db} onAddContactToSession={handleAddContactToSessionList} setMessage={setMessage} currentSessionAttendees={currentSessionAttendees} getAppId={getAppId} />
+              <SessionDetailsModal show={showSessionDetailsModal} onClose={() => setShowSessionDetailsModal(false)} session={selectedCalendarSession} tags={tags} onEditSession={handleEditSession} onDeleteSession={handleDeleteSession} />
+              <ConfirmationModal show={showConfirmationModal} onClose={() => setShowConfirmationModal(false)} onConfirm={confirmDeleteSession} message="¿Estás seguro de que quieres eliminar esta sesión? Esta acción no se puede deshacer." />
+            </div>
+          );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+
+</body>
+</html>

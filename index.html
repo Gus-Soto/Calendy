@@ -561,7 +561,7 @@
           const handleSendRemindersNow = (session) => { // <-- **Hemos quitado 'async' aquí**
               setMessage(`Procesando recordatorios para "${session.title}"...`);
               
-              const webhookUrl = 'https://c345f5a26a09.ngrok-free.app/webhook/940fd311-574a-40f6-9230-a00812a4f7c8'; 
+              const webhookUrl = 'http://localhost:5678/webhook-test/940fd311-574a-40f6-9230-a00812a4f7c8'; 
               
               // Usamos promesas (.then().catch()) en lugar de async/await
               fetch(webhookUrl, { 
